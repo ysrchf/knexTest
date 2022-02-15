@@ -19,8 +19,9 @@
   },
   "dependencies": {
     "express": "^4.17.2",
-    "knex": "^1.0.1",
+    "knex": "^1.0.3",
     "morgan": "^1.10.0",
+    "objection": "^3.0.1",
     "pg": "^8.7.1"
   }
 }

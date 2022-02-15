@@ -3,6 +3,6 @@ module.exports = {
   connection: {
     user: "postgres",
     password: "BnHA!PU!99",
-    database: "bank",
+    database: "users",
   },
-};
+}

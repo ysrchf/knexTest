@@ -1,28 +1,19 @@
-const { join } = require("path")
-const { readFile, writeFile, access, readdir } = require("fs/promises")
-const {
-  constants: { R_OK },
-} = require("fs")
 const express = require("express")
+const { default: knex } = require("knex")
 const morgan = require("morgan")
+const knexfile = require("./knexfile.js")
+const handleDBErrors = require("./handleDBErrors.js")
+const UserModel = require("./models/UserModel.js")
+const { Model } = require("objection")
 
 const app = express()
-
-const DB_DIR = join(__dirname, "../db")
 
 // middleware
 app.use(morgan("dev"))
 app.use(express.json())
 
-const genNextId = async (resource) => {
-  const filename = join(DB_DIR, resource, "lastId")
-  const lastId = Number(await readFile(filename))
-
-  await writeFile(filename, String(lastId + 1), { encoding: "utf-8" })
-
-  return lastId + 1
-}
-
+const db = knex(knexfile)
+Model.knex(db)
 // users
 // CREATE
 app.post("/users", async (req, res) => {
@@ -30,35 +21,21 @@ app.post("/users", async (req, res) => {
     body: { firstName, lastName, email },
   } = req
 
-  const userId = await genNextId("users")
-  const user = {
-    id: userId,
-    firstName,
-    lastName,
-    email,
+  try {
+    const [user] = await db("user")
+      .insert({
+        firstName,
+        lastName,
+        email,
+      })
+      .returning("*")
+
+    res.send(user)
+  } catch (err) {
+    const error = handleDBErrors(err)
+
+    res.status(420).send({ error })
   }
-  const filename = join(DB_DIR, "users", `${userId}.json`)
-  await writeFile(filename, JSON.stringify(user), { encoding: "utf-8" })
-
-  res.send(user)
-})
-
-app.patch("/users/maj/:userId", async (req, res) => {
-  const {
-    body: { firstName, lastName },
-    params: { userId },
-  } = req
-
-  const user = {
-    id: Number(userId),
-    firstName,
-    lastName,
-  }
-
-  const filename = join(DB_DIR, "users", `${userId}.json`)
-
-  await writeFile(filename, JSON.stringify(user), { encoding: "utf-8" })
-  res.send(user)
 })
 
 // READ
@@ -68,36 +45,97 @@ app.get("/users/:userId", async (req, res) => {
     params: { userId },
   } = req
 
-  const filename = join(DB_DIR, "users", `${userId}.json`)
+  const user = await UserModel.query().findById(userId)
 
-  try {
-    await access(filename, R_OK)
-  } catch (err) {
+  if (!user) {
     res.status(404).send({ error: "no such user" })
 
     return
   }
 
-  const buf = await readFile(filename, { encoding: "utf-8" })
-
-  res.setHeader("Content-Type", "application/json").send(buf)
+  res.send(user)
 })
 
 // READ
 // collection
 app.get("/users", async (req, res) => {
-  const dbDir = join(DB_DIR, "users")
-  const entries = await readdir(dbDir)
-  const users = (
-    await Promise.all(
-      entries
-        .filter((entry) => entry.endsWith(".json"))
-        .map((entry) => join(dbDir, entry))
-        .map((entry) => readFile(entry, { encoding: "utf-8" }))
-    )
-  ).map((data) => JSON.parse(data))
+  res.send(await db("user"))
+})
 
-  res.send(users)
+// UPDATE
+// full
+app.put("/users/:userId", async (req, res) => {
+  const {
+    params: { userId },
+    body: { firstName, lastName, email },
+  } = req
+
+  const [user] = await db("user").where({ id: userId })
+
+  if (!user) {
+    res.status(404).send({ error: "no such user" })
+
+    return
+  }
+
+  await db("user").delete().where({ id: userId })
+
+  const [updatedUser] = await db("user")
+    .insert({
+      id: user.id,
+      firstName,
+      lastName,
+      email,
+    })
+    .returning("*")
+
+  res.send(updatedUser)
+})
+
+// UPDATE
+// partial
+app.patch("/users/:userId", async (req, res) => {
+  const {
+    params: { userId },
+    body: payload,
+  } = req
+
+  const [user] = await db("user").where({ id: userId })
+
+  if (!user) {
+    res.status(404).send({ error: "no such user" })
+
+    return
+  }
+  console.log(user, payload)
+  const [updatedUser] = await db("user")
+    .update({
+      ...user,
+      ...payload,
+    })
+    .where({ id: userId })
+    .returning("*")
+
+  res.send(updatedUser)
+})
+
+// DELETE
+app.delete("/users/:userId", async (req, res) => {
+  const {
+    params: { userId },
+  } = req
+
+  const [user] = await db("user").where({ id: userId })
+
+  if (!user) {
+    res.status(404).send({ error: "no such user" })
+
+    return
+  }
+
+  await db("user").delete().where({ id: userId })
+
+  res.send()
 })
 
 app.listen(3000, () => console.log("Listening on :3000"))
